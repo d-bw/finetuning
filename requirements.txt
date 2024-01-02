@@ -1,0 +1,12 @@
+trl
+sentencepiece
+wandb
+gradio
+accelerate
+peft
+torch>=2.0.1
+bitsandbytes
+datasets
+optimum
+huggingface_hub
+transformers>=4.31.0
