@@ -15,9 +15,9 @@ from peft import (
 )
 from trl import SFTTrainer
 
-base_model_name = "Sacralet/llama2-chat-7B"
-dataset_name = "Sacralet/llama_chat_nesting_dataset"
-finetuned_model_name = "dbw-7B-0.1"
+base_model_name = "Sacralet/mistral-7B"
+dataset_name = "Sacralet/mistral_chat_nesting_dataset"
+finetuned_model_name = "dbw-mistral-7B-1"
 
 import wandb
 import huggingface_hub
@@ -37,7 +37,9 @@ huggingface_hub.login(token=huggingface_hub_token)
 wandb.login(key=wandb_key)
 wandb.init(resume=True, project=finetuned_model_name, name=finetuned_model_name)
 
-dataset = load_dataset(dataset_name, split="train")
+train_dataset = load_dataset(dataset_name, split="train")
+val_dataset = load_dataset(dataset_name, split="validation")
+
 
 bnb_config = BitsAndBytesConfig(
   load_in_4bit=True,
@@ -73,7 +75,7 @@ tokenizer.pad_token = tokenizer.unk_token
 
 
 peft_config = LoraConfig(
-  lora_alpha=16,
+  lora_alpha=128,
   lora_dropout=0.1,
   r=64,
   bias="none",
@@ -88,6 +90,9 @@ if checkpoint_dir.is_dir():
     resume_from_checkpoint = True
 
 training_arguments = TrainingArguments(
+  do_eval=True,
+  evaluation_strategy="steps",
+  eval_delay=2000,
   push_to_hub=True,
   output_dir=finetuned_model_name,
   warmup_ratio=0.03,
@@ -95,7 +100,7 @@ training_arguments = TrainingArguments(
   gradient_accumulation_steps=1,
   num_train_epochs=1,
   lr_scheduler_type="cosine",
-  learning_rate=1e-5,
+  learning_rate=1e-6,
   weight_decay=0.001,
   fp16=False,
   bf16=False,
@@ -103,7 +108,7 @@ training_arguments = TrainingArguments(
   logging_dir="./log",
   logging_steps=10,
   save_strategy="steps",
-  save_steps=10,
+  save_steps=2000,
   save_total_limit=1,
   max_grad_norm=0.3,
   max_steps=-1,
@@ -113,7 +118,8 @@ training_arguments = TrainingArguments(
 
 trainer = SFTTrainer(
   model=model,
-  train_dataset=dataset,
+  train_dataset=train_dataset,
+  eval_dataset=val_dataset,
   peft_config=peft_config,
   dataset_text_field="prompt",
   max_seq_length=2048,
