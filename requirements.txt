@@ -10,3 +10,5 @@ datasets
 optimum
 huggingface_hub
 transformers>=4.31.0
+pandas
+argparse
