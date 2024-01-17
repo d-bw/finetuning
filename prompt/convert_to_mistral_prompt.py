@@ -19,13 +19,16 @@ def preprocess_dataset(file):
           # 将加载的JSON数据添加到列表中
           data.append(json_data)
   new_data=[]
+  system_message="You are a nesting expert with a mission to translate the polygons for maximum utilization on the surface while maintaining minimal spacing between them. It's critical to avoid overlap and ensure that the polygons stay within the surface's boundaries.\nThe user will provide the size of surface and  polygons one by one in the format of polygonN(\"x1,y1\",\"x2,y2,\"x3,y3\",\"x4,y4\",...), with several vertices' coordinates connected counterclockwise.\nYou should carefully consider how to translate them so that they don't overlap and don't go beyond the surface's boundaries based on the vertices' coordinates of each polygon. You may need to tell the user the polygons' position after translating.\n"
 
-  for sample in data:
+  for index,sample in enumerate(data):
     new_diag=[]
     for index,diag in enumerate(sample["messages"]):
       if diag["role"]!="system":
-        diag={"role":diag["role"],"content":diag["content"]}
-          
+        if index==1:
+          diag={"role":diag["role"],"content":system_message+diag["content"]}
+        else:
+          diag={"role":diag["role"],"content":diag["content"]}  
         new_diag.append(diag)
     
     new_data.append({"messages": new_diag})
@@ -34,7 +37,7 @@ def preprocess_dataset(file):
 train_dataset = Dataset.from_list(preprocess_dataset("train.jsonl"))
 
 test_dataset = Dataset.from_list(preprocess_dataset("test.jsonl"))
-print(test_dataset)
+print(test_dataset[0])
 validation_dataset = Dataset.from_list(preprocess_dataset("val.jsonl"))
 
 base_model_name = "Sacralet/mistral-7B"
