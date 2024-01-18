@@ -17,10 +17,19 @@ from trl import SFTTrainer
 
 base_model_name = "Sacralet/mistral-7B"
 dataset_name = "Sacralet/mistral_chat_nesting_dataset"
-finetuned_model_name = "dbw-mistral-7B-1"
+finetuned_model_name = "dbw-mistral-7B-2"
 
 import wandb
 import huggingface_hub
+from datasets import load_metric
+
+def compute_metrics(eval_preds):
+    metric = load_metric("glue", "mrpc")
+    logits, labels = eval_preds.predictions, eval_preds.label_ids
+    # 上一行可以直接简写成：
+    # logits, labels = eval_preds  因为它相当于一个tuple
+    predictions = np.argmax(logits, axis=-1)
+    return metric.compute(predictions=predictions, references=labels)
 
 hg_cache_dir = "/content/workspace"
 
@@ -92,11 +101,12 @@ if checkpoint_dir.is_dir():
 training_arguments = TrainingArguments(
   do_eval=True,
   evaluation_strategy="steps",
-  eval_delay=2000,
+  eval_delay=100,
+  eval_steps=100,
   push_to_hub=True,
   output_dir=finetuned_model_name,
   warmup_ratio=0.03,
-  per_device_train_batch_size=4,
+  per_device_train_batch_size=8,
   gradient_accumulation_steps=1,
   num_train_epochs=1,
   lr_scheduler_type="cosine",
@@ -106,9 +116,9 @@ training_arguments = TrainingArguments(
   bf16=False,
   optim="paged_adamw_32bit",
   logging_dir="./log",
-  logging_steps=10,
+  logging_steps=1,
   save_strategy="steps",
-  save_steps=2000,
+  save_steps=100,
   save_total_limit=1,
   max_grad_norm=0.3,
   max_steps=-1,
@@ -128,6 +138,7 @@ trainer = SFTTrainer(
   packing=False,
 )
 
-trainer.train(resume_from_checkpoint=resume_from_checkpoint)
+trainer.train(resume_from_checkpoint='dbw-mistral-7B-2/checkpoint-400')
+#trainer.train()
 trainer.push_to_hub()
 
