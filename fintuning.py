@@ -2,34 +2,50 @@ import logging
 import os
 from pathlib import Path
 import torch
+import argparse
 from datasets import load_dataset
 from transformers import (
   AutoModelForCausalLM,
+  LlamaForCausalLM,
+  BertForMaskedLM, 
+  LlamaTokenizer,
+  BertTokenizer,
   AutoTokenizer,
   BitsAndBytesConfig,
   TrainingArguments,
+  Trainer
 )
+import wandb
+import huggingface_hub
 from peft import (
   prepare_model_for_kbit_training, 
   LoraConfig
 )
 from trl import SFTTrainer
 
-base_model_name = "Sacralet/mistral-7B"
-dataset_name = "Sacralet/mistral_chat_nesting_dataset"
-finetuned_model_name = "dbw-mistral-7B-2"
+parser = argparse.ArgumentParser(description='choose for fintuning details')
 
-import wandb
-import huggingface_hub
-from datasets import load_metric
+parser.add_argument('-model_type', '--type', dest='model_type', type=str,required=True,
+                     help='choose from maskedLM and casualLM')
 
-def compute_metrics(eval_preds):
-    metric = load_metric("glue", "mrpc")
-    logits, labels = eval_preds.predictions, eval_preds.label_ids
-    # 上一行可以直接简写成：
-    # logits, labels = eval_preds  因为它相当于一个tuple
-    predictions = np.argmax(logits, axis=-1)
-    return metric.compute(predictions=predictions, references=labels)
+parser.add_argument('-model_id', '--id', dest='model_id', type=str,required=True,
+                     help='input your model name space')
+
+parser.add_argument('-dataset', '--dataset', dest='dataset', type=str,required=True,
+                     help='input your dataset name space')
+
+parser.add_argument('-output', '--output', dest='output', type=str,required=True,
+                     help='input your name space fot save model')
+
+
+args = parser.parse_args()
+
+#base_model_name = "Sacralet/mistral-7B"
+base_model_name=args.model_id
+#dataset_name = "Sacralet/mistral_chat_nesting_dataset"
+dataset_name=args.dataset
+#finetuned_model_name = "dbw-mistral-7B-1"
+finetuned_model_name=args.output
 
 hg_cache_dir = "/content/workspace"
 
@@ -50,55 +66,68 @@ train_dataset = load_dataset(dataset_name, split="train")
 val_dataset = load_dataset(dataset_name, split="validation")
 
 
-bnb_config = BitsAndBytesConfig(
+if args.model_type=="casualLM":
+  
+  bnb_config = BitsAndBytesConfig(
   load_in_4bit=True,
   bnb_4bit_use_double_quant=True,
   bnb_4bit_quant_type="nf4",
   bnb_4bit_compute_dtype=torch.bfloat16
 )
+  if "llama" in base_model_name.lower():
+    model = LlamaForCausalLM.from_pretrained(
+    base_model_name,
+    quantization_config=bnb_config,
+    resume_download=True,
+    device_map="auto",
+    trust_remote_code=True,
+    use_auth_token=True,
+    cache_dir=hg_cache_dir
+    )
+    
+    tokenizer = LlamaTokenizer.from_pretrained(
+    base_model_name, 
+    padding_side="right",
+    trust_remote_code=True,
+    cache_dir=hg_cache_dir
+    )
 
-model = AutoModelForCausalLM.from_pretrained(
-  base_model_name,
-  quantization_config=bnb_config,
-  resume_download=True,
-  device_map="auto",
-  trust_remote_code=True,
-  use_auth_token=True,
-  cache_dir=hg_cache_dir
-)
-model.config.use_cache = False
-model.config.pretraining_tp = 1
+  elif "mistral" in base_model_name.lower():
 
-model.gradient_checkpointing_enable()
-model = prepare_model_for_kbit_training(model, 4)
-
-tokenizer = AutoTokenizer.from_pretrained(
-  base_model_name, 
-  padding_side="right",
-  trust_remote_code=True,
-  cache_dir=hg_cache_dir
-)
-
-tokenizer.eos_token = "</s>"
-tokenizer.pad_token = tokenizer.unk_token
+    model = AutoModelForCausalLM.from_pretrained(
+    base_model_name,
+    quantization_config=bnb_config,
+    resume_download=True,
+    device_map="auto",
+    trust_remote_code=True,
+    use_auth_token=True,
+    cache_dir=hg_cache_dir
+    )
+    tokenizer = AutoTokenizer.from_pretrained(
+    base_model_name, 
+    padding_side="right",
+    trust_remote_code=True,
+    cache_dir=hg_cache_dir
+    )
+    tokenizer.eos_token = "</s>"
+    tokenizer.pad_token = tokenizer.unk_token
+  
 
 
-peft_config = LoraConfig(
+  model.config.use_cache = False
+  model.config.pretraining_tp = 1
+
+  model.gradient_checkpointing_enable()
+  model = prepare_model_for_kbit_training(model, 4)
+
+  peft_config = LoraConfig(
   lora_alpha=128,
   lora_dropout=0.1,
   r=64,
   bias="none",
   task_type="CAUSAL_LM",
-)
-
-checkpoint_dir = Path(finetuned_model_name)
-resume_from_checkpoint = False
-if checkpoint_dir.is_dir():
-  checkpoint_files = list(checkpoint_dir.glob("checkpoint-*"))
-  if checkpoint_files:
-    resume_from_checkpoint = True
-
-training_arguments = TrainingArguments(
+  )
+  training_arguments = TrainingArguments(
   do_eval=True,
   evaluation_strategy="steps",
   eval_delay=100,
@@ -124,21 +153,85 @@ training_arguments = TrainingArguments(
   max_steps=-1,
   group_by_length=True,
   report_to="wandb",
-)
+  )
 
-trainer = SFTTrainer(
+  trainer = SFTTrainer(
+    model=model,
+    train_dataset=train_dataset,
+    eval_dataset=val_dataset,
+    peft_config=peft_config,
+    dataset_text_field="prompt",
+    max_seq_length=2048,
+    tokenizer=tokenizer,
+    args=training_arguments,
+    packing=False,
+  )
+
+
+elif args.model_type=="maskedLM":
+  if "bert" in base_model_name.lower():
+    model = BertForMaskedLM.from_pretrained(
+      base_model_name,
+      resume_download=True,
+      trust_remote_code=True,
+      use_auth_token=True,
+      cache_dir=hg_cache_dir
+      )
+    tokenizer = BertTokenizer.from_pretrained(
+      base_model_name, 
+      padding_side="right",
+      trust_remote_code=True,
+      cache_dir=hg_cache_dir
+    )
+  model.gradient_checkpointing_enable()
+  model.config.use_cache = False
+  model.config.pretraining_tp = 1
+
+  training_arguments = TrainingArguments(
+  do_eval=True,
+  evaluation_strategy="steps",
+  eval_delay=500,
+  eval_steps=500,
+  push_to_hub=True,
+  output_dir=finetuned_model_name,
+  warmup_ratio=0.03,
+  per_device_train_batch_size=32,
+  gradient_accumulation_steps=1,
+  num_train_epochs=1,
+  lr_scheduler_type="cosine",
+  learning_rate=1e-5,
+  weight_decay=0.001,
+  fp16=False,
+  bf16=False,
+  optim="paged_adamw_32bit",
+  logging_dir="./log",
+  logging_steps=1,
+  save_strategy="steps",
+  save_steps=500,
+  save_total_limit=1,
+  max_grad_norm=0.3,
+  max_steps=-1,
+  group_by_length=True,
+  report_to="wandb",
+  )
+  trainer = SFTTrainer(
   model=model,
   train_dataset=train_dataset,
   eval_dataset=val_dataset,
-  peft_config=peft_config,
   dataset_text_field="prompt",
-  max_seq_length=2048,
-  tokenizer=tokenizer,
   args=training_arguments,
   packing=False,
-)
+  max_seq_length=512,  
+  )
 
-trainer.train(resume_from_checkpoint='dbw-mistral-7B-2/checkpoint-400')
-#trainer.train()
+checkpoint_dir = Path(finetuned_model_name)
+resume_from_checkpoint = False
+if checkpoint_dir.is_dir():
+  checkpoint_files = list(checkpoint_dir.glob("checkpoint-*"))
+  if checkpoint_files:
+    resume_from_checkpoint = True
+
+
+trainer.train(resume_from_checkpoint=resume_from_checkpoint)
 trainer.push_to_hub()
 
