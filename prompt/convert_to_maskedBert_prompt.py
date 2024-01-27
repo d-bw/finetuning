@@ -53,7 +53,7 @@ def convert_to_maskedBertPrompt(sample):
     }
 
 
-    prompt="I will complete a nesting task on a rectangular surface. The origin of the surface starts from (0,0), with the x range ending at (128,0), and the y range ending at (0,400).In this process, I will ensure each rectangle is arranged closely, maximizing the filling of the given area without overlapping. After translating, the coordinates of the polygon have changed:\n"
+    prompt="I will complete a nesting task on a rectangular surface. The origin of the surface starts from (0,0), with the x range ending at (128,0), and the y range ending at (0,400). In this process, I will ensure each rectangle is arranged closely, maximizing the filling of the given area without overlapping by translating. After translating, the coordinates of the polygon have changed:\n"
     polygons=new_sample['Polygons']
     pre_polygons=new_sample['Predictions']
 
@@ -70,7 +70,7 @@ def convert_to_maskedBertPrompt(sample):
 
 
 
-data=preprocess_dataset("D:\PostGraduate\实验\\nesting_dataset\\nesting_dataset\\nesting_dataset\dataset\output\\rectangles\\bert_nesting.jsonl")
+data=preprocess_dataset("bert_nesting.jsonl")
 
 train_dataset = Dataset.from_list(data[0:9000]+data[10000:19000]+data[20000:29000]+data[30000:39000]) 
 train_dataset = train_dataset.map(convert_to_maskedBertPrompt)
@@ -86,6 +86,6 @@ test_dataset = test_dataset.map(convert_to_maskedBertPrompt)
 test_dataset=test_dataset.select_columns(('messages','prompt'))
 
 
-train_dataset.push_to_hub("Sacralet/mistral_chat_nesting_dataset", private=False, token=huggingface_hub_token,split="train")
-val_dataset.push_to_hub("Sacralet/mistral_chat_nesting_dataset", private=False, token=huggingface_hub_token,split="validation")
-test_dataset.push_to_hub("Sacralet/mistral_chat_nesting_dataset", private=False, token=huggingface_hub_token,split="test")
+train_dataset.push_to_hub("Sacralet/bertMasked_nestingDataset", private=False, token=huggingface_hub_token,split="train")
+val_dataset.push_to_hub("Sacralet/bertMasked_nestingDataset", private=False, token=huggingface_hub_token,split="validation")
+test_dataset.push_to_hub("Sacralet/bertMasked_nestingDataset", private=False, token=huggingface_hub_token,split="test")

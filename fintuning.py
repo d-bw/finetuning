@@ -2,8 +2,9 @@ import logging
 import os
 from pathlib import Path
 import torch
+from utils.concatenated_dataset import tokenize_function
 import argparse
-from datasets import load_dataset
+from datasets import load_dataset, Dataset
 from transformers import (
   AutoModelForCausalLM,
   LlamaForCausalLM,
@@ -22,6 +23,7 @@ from peft import (
   LoraConfig
 )
 from trl import SFTTrainer
+
 
 parser = argparse.ArgumentParser(description='choose for fintuning details')
 
@@ -64,6 +66,7 @@ wandb.init(resume=True, project=finetuned_model_name, name=finetuned_model_name)
 
 train_dataset = load_dataset(dataset_name, split="train")
 val_dataset = load_dataset(dataset_name, split="validation")
+
 
 
 if args.model_type=="casualLM":
@@ -183,6 +186,11 @@ elif args.model_type=="maskedLM":
       trust_remote_code=True,
       cache_dir=hg_cache_dir
     )
+    train_token_dataset=train_dataset.map(tokenize_function, remove_columns=["messages", "prompt"])
+    val_token_dataset=val_dataset.map(tokenize_function, remove_columns=["messages", "prompt"])
+    print(tokenizer.decode(train_token_dataset[1]['input_ids']))
+    print(val_token_dataset)
+
   model.gradient_checkpointing_enable()
   model.config.use_cache = False
   model.config.pretraining_tp = 1
@@ -190,8 +198,8 @@ elif args.model_type=="maskedLM":
   training_arguments = TrainingArguments(
   do_eval=True,
   evaluation_strategy="steps",
-  eval_delay=500,
-  eval_steps=500,
+  eval_delay=100,
+  eval_steps=100,
   push_to_hub=True,
   output_dir=finetuned_model_name,
   warmup_ratio=0.03,
@@ -214,14 +222,11 @@ elif args.model_type=="maskedLM":
   group_by_length=True,
   report_to="wandb",
   )
-  trainer = SFTTrainer(
+  trainer = Trainer(
   model=model,
-  train_dataset=train_dataset,
-  eval_dataset=val_dataset,
-  dataset_text_field="prompt",
-  args=training_arguments,
-  packing=False,
-  max_seq_length=512,  
+  train_dataset=train_token_dataset,
+  eval_dataset=val_token_dataset,
+  args=training_arguments  
   )
 
 checkpoint_dir = Path(finetuned_model_name)
